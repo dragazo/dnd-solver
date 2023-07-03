@@ -34,9 +34,9 @@ def main():
     board = [[PARSER[y] for y in x[1:]] for x in board[1:]]
     num_cols = len(col_hints)
     num_rows = len(row_hints)
+    knowns = [(i, j) for i in range(num_rows) for j in range(num_cols) if board[i][j] is not None and board[i][j] != WALL]
     chest_pos = [(i, j) for i in range(num_rows) for j in range(num_cols) if board[i][j] == CHEST]
-    assert len(chest_pos) == 1
-    chest_pos = chest_pos[0]
+    assert len(knowns) >= 1
 
     s = z3.Solver()
     def make_state(name, val):
@@ -62,8 +62,9 @@ def main():
     reach = z3.Function('r', P, P, z3.BoolSort())
     reach_tc = z3.TransitiveClosure(reach)
 
-    dummy_i, dummy_j, dummy_x, dummy_y = z3.Ints('dumi dumj dumx dumy')
-    s.add(z3.ForAll([dummy_i, dummy_j, dummy_x, dummy_y], z3.Implies(z3.Or(dummy_i < 0, dummy_i >= num_rows, dummy_j < 0, dummy_j >= num_cols, dummy_x < 0, dummy_x >= num_rows, dummy_y < 0, dummy_y >= num_cols), z3.Not(reach(mkP(dummy_i, dummy_j), mkP(dummy_x, dummy_y))))))
+    dum = z3.Ints('dumi dumj dumx dumy')
+    out_of_bounds = z3.Or(dum[0] < 0, dum[0] >= num_rows, dum[1] < 0, dum[1] >= num_cols, dum[2] < 0, dum[2] >= num_rows, dum[3] < 0, dum[3] >= num_cols)
+    s.add(z3.ForAll(dum, z3.Implies(out_of_bounds, z3.Not(reach(mkP(dum[0], dum[1]), mkP(dum[2], dum[3]))))))
 
     for i in range(num_rows):
         for j in range(num_cols):
@@ -72,11 +73,21 @@ def main():
                 for y in range(num_cols):
                     q = (x, y)
                     d = abs(i - x) + abs(j - y)
-                    if d == 1:
+                    if d == 0:
+                        s.add(reach(mkP(p), mkP(q)))
+                    elif d == 1:
                         s.add(reach(mkP(p), mkP(q)) == z3.And(sol[p] != WALL, sol[q] != WALL))
                     else:
                         s.add(z3.Not(reach(mkP(p), mkP(q))))
-            s.add(z3.Or(sol[p] == WALL, reach_tc(mkP(chest_pos), mkP(p))))
+            s.add(z3.Or(sol[p] == WALL, reach_tc(mkP(knowns[0]), mkP(p))))
+
+    deg = {}
+    for i in range(num_rows):
+        for j in range(num_cols):
+            p = (i, j)
+            adj = [(i - 1, j), (i, j - 1), (i, j + 1), (i + 1, j)]
+            deg[p] = sum(z3.If(sol[q] != WALL, 1, 0) for q in adj)
+            s.add(z3.Implies(sol[p] != WALL, (deg[p] == 1) == (sol[p] == MONSTER)))
 
     res = s.check()
     if res == z3.sat:
